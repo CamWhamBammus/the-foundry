@@ -1,0 +1,153 @@
+// The Foundry — local-first tracker for game projects: builds, backlog,
+// devlog, and a shelf for what shipped (or didn't). SQLite database, same
+// "one file under Application Support" pattern as the rest of the cabin's
+// apps. See the-forge's schema.prisma for the sibling this was adapted from.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum ProjectStatus {
+  ACTIVE
+  PAUSED
+  SHIPPED
+  ABANDONED
+}
+
+enum TaskType {
+  FEATURE
+  BUG
+  ASSET
+  POLISH
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum DevlogKind {
+  BUILD
+  PLAYTEST
+  LEARNING
+  NOTE
+}
+
+// Unlike the-forge, several Projects can be ACTIVE/PAUSED at once — this
+// is a workbench for however many game projects are actually in flight,
+// not a single weekly sprint.
+model Project {
+  id          String  @id @default(cuid())
+  title       String
+  description String?
+  engine      String? // free text: "Unity 6 / C#", "Godot 4", "Custom C++/OpenGL"...
+  genre       String?
+
+  status ProjectStatus @default(ACTIVE)
+
+  startAt    DateTime  @default(now())
+  targetDate DateTime?
+  shippedAt  DateTime?
+
+  // A reflection note, filled in on shipping or abandoning — the honest
+  // record of what actually happened, not just the outcome.
+  retro String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  milestones    Milestone[]
+  tasks         Task[]
+  devlogEntries DevlogEntry[]
+  builds        Build[]
+  linkedBooks   LinkedBook[]
+
+  @@index([status])
+}
+
+model Milestone {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  title       String
+  order       Int
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+}
+
+// A single backlog item — a feature to build, a bug to squash, an asset
+// to make, or a polish pass. Grouped by type on the project board.
+model Task {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  title  String
+  type   TaskType
+  status TaskStatus @default(TODO)
+  order  Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+}
+
+// A devlog entry — what got built, a playtest note, something learned
+// along the way. Multiple per day are fine, unlike the-forge's
+// one-per-day CheckIn: a devlog is a running log, not a daily standup.
+model DevlogEntry {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  date DateTime
+  kind DevlogKind @default(NOTE)
+  body String
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+}
+
+// A tagged build/version — the playable checkpoints of a project.
+model Build {
+  id        String  @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  version String
+  date    DateTime @default(now())
+  notes   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
+}
+
+// A book from Reading Cabin's library, linked to this project as fuel for
+// it. textbookId is a soft cross-app reference (Reading Cabin's own
+// Textbook.id) — no real foreign key, since the two apps keep separate
+// SQLite databases. Live title/cover/progress is always fetched fresh from
+// Reading Cabin's API, never cached here. Identical pattern to the-forge's
+// LinkedBook.
+model LinkedBook {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  textbookId String
+  addedAt    DateTime @default(now())
+
+  @@unique([projectId, textbookId])
+}
